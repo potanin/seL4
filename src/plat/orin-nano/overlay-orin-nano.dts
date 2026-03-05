@@ -7,14 +7,13 @@
 / {
 	chosen {
 		seL4,elfloader-devices =
-		    "serial1",
+		    &{/serial@c280000},
 		    &{/psci},
 		    &{/timer};
 		seL4,kernel-devices =
-		    "serial1",
+		    &{/serial@c280000},
 		    &{/bus@0/interrupt-controller@f400000},
-		    &{/timer},
-		    &{/bpmp-ipc@3c90000};
+		    &{/timer};
 	};
 
 	memory@80000000 {
@@ -28,18 +27,17 @@
 	};
 
 	/*
-	 * BPMP IPC regions for UART clock keepalive.
-	 * BPMP firmware gates UARTA clock ~8-9 min after boot;
-	 * the kernel re-enables it via MRQ_CLK when UART stops responding.
-	 *
-	 * reg[0]: HSP doorbell page (DB3 at offset 0x300)
-	 * reg[1]: IVC TX shmem (CPU→BPMP requests)
-	 * reg[2]: IVC RX shmem (BPMP→CPU responses)
+	 * UARTC — AON-domain debug UART on J14 button header.
+	 * J14 Pin 3=RXD, Pin 4=TXD, Pin 7=GND, 3.3V levels.
+	 * SoC pads: GP11_UART3_TXD, GP12_UART3_RXD.
 	 */
-	bpmp-ipc@3c90000 {
-		compatible = "nvidia,tegra234-bpmp-ipc";
-		reg = <0x00 0x3c90000 0x00 0x1000
-		       0x00 0x40070000 0x00 0x1000
-		       0x00 0x40071000 0x00 0x1000>;
+	serial@c280000 {
+		compatible = "nvidia,tegra194-hsuart";
+		reg = <0x00 0x0c280000 0x00 0x10000>;
+		interrupts = <0x00 0x72 0x04>; /* SPI 114, level high */
+		clocks = <0x03 0x9d>;          /* TEGRA234_CLK_UARTC = 157 */
+		resets = <0x03 0x66>;          /* TEGRA234_RESET_UARTC = 102 */
+		reset-names = "serial";
+		status = "okay";
 	};
 };
