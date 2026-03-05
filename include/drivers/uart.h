@@ -6,8 +6,7 @@
 
 #pragma once
 
-#ifdef CONFIG_PRINTING
-
+/* Always available — needed for SysDebugPutChar even without CONFIG_PRINTING */
 void uart_drv_putchar(unsigned char c);
 
 static inline void uart_console_putchar(
@@ -20,8 +19,9 @@ static inline void uart_console_putchar(
     uart_drv_putchar(c);
 }
 
-#endif /* CONFIG_PRINTING */
-
 #ifdef CONFIG_DEBUG_BUILD
 unsigned char uart_drv_getchar(void);
 #endif
+
+/* BPMP UART clock keepalive — call periodically to prevent BPMP from gating the clock */
+void uart_keepalive_tick(void);

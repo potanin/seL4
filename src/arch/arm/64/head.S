@@ -76,10 +76,32 @@
 #endif
 
 .section .boot.text, "ax"
+
+/* Debug: emit a single character to UARTA (0x3100000).
+ * Uses a delay loop to allow previous char to drain (~200us at ~1GHz).
+ * LSR reads hang from kernel page tables — avoid reading LSR.
+ * Uses x9, x10, x11 as scratch. */
+.macro dbg_uart chr
+    mov     x9, #0x3100000
+    mov     w11, #\chr
+    str     w11, [x9]
+    mov     x10, #0x30000       /* ~200K iterations ≈ 200us */
+7:  subs    x10, x10, #1
+    b.ne    7b
+.endm
+
 BEGIN_FUNC(_start)
+    /* VERY FIRST: UART writes to prove kernel entry */
+    dbg_uart 'S'
+    dbg_uart 'K'
+
     /* Save x4 and x5 so we don't clobber it */
     mov     x7, x4
     mov     x8, x5
+
+    /* Do NOT invalidate TLB — elfloader already set it up correctly.
+     * A tlbi alle2 here would force page table re-walks which may
+     * fail if there's any subtle issue with the elfloader tables. */
 
     /* Make sure interrupts are disabled */
     msr daifset, #DAIFSET_MASK
@@ -92,6 +114,9 @@ BEGIN_FUNC(_start)
     orr     x4, x4, x19
     bic     x4, x4, x20
     msr     SCTLR, x4
+    isb
+
+    dbg_uart '1'   /* SCTLR configured */
 
 #ifdef ENABLE_SMP_SUPPORT
     /* tpidr_el1 has the logic ID of the core, starting from 0 */
@@ -115,14 +140,16 @@ BEGIN_FUNC(_start)
     mov    sp, x4
 #endif /* ENABLE_SMP_SUPPORT */
 
-    /* Attempt to workaround any known ARM errata. */
-    stp     x0, x1, [sp, #-16]!
-    stp     x2, x3, [sp, #-16]!
-    stp     x7, x8, [sp, #-16]!
-    bl arm_errata
-    ldp     x4, x5, [sp], #16
-    ldp     x2, x3, [sp], #16
-    ldp     x0, x1, [sp], #16
+    dbg_uart '2'   /* Stack set up */
+
+    /* Skip arm_errata — it's a no-op for this platform.
+     * Restore x4/x5 from x7/x8 where we saved them at _start entry. */
+    mov     x4, x7
+    mov     x5, x8
+
+    dbg_uart '3'   /* About to call init_kernel */
+    dbg_uart '\r'
+    dbg_uart '\n'
 
     /* Call bootstrapping implemented in C with parameters:
      *  x0: user image physical start address

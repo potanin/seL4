@@ -1,0 +1,45 @@
+/*
+ * Copyright 2025
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
+/ {
+	chosen {
+		seL4,elfloader-devices =
+		    "serial1",
+		    &{/psci},
+		    &{/timer};
+		seL4,kernel-devices =
+		    "serial1",
+		    &{/bus@0/interrupt-controller@f400000},
+		    &{/timer},
+		    &{/bpmp-ipc@3c90000};
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		/*
+		 * First contiguous RAM region from /proc/iomem.
+		 * UEFI populates memory at runtime; this provides a
+		 * known-good 992 MB region for initial bringup.
+		 */
+		reg = <0x00 0x80000000 0x00 0x3e000000>;
+	};
+
+	/*
+	 * BPMP IPC regions for UART clock keepalive.
+	 * BPMP firmware gates UARTA clock ~8-9 min after boot;
+	 * the kernel re-enables it via MRQ_CLK when UART stops responding.
+	 *
+	 * reg[0]: HSP doorbell page (DB3 at offset 0x300)
+	 * reg[1]: IVC TX shmem (CPU→BPMP requests)
+	 * reg[2]: IVC RX shmem (BPMP→CPU responses)
+	 */
+	bpmp-ipc@3c90000 {
+		compatible = "nvidia,tegra234-bpmp-ipc";
+		reg = <0x00 0x3c90000 0x00 0x1000
+		       0x00 0x40070000 0x00 0x1000
+		       0x00 0x40071000 0x00 0x1000>;
+	};
+};

@@ -187,6 +187,7 @@ devices:
       - fsl,imx7ulp-lpuart
       - fsl,imx6sx-uart
       - nvidia,tegra124-hsuart
+      - nvidia,tegra194-hsuart
       - nvidia,tegra20-uart
       - qcom,msm-uartdm
       - samsung,exynos4210-uart
@@ -221,6 +222,25 @@ devices:
     regions:
       - index: 0
         kernel: CLINT_PPTR
+
+  # BPMP IPC for UART clock keepalive (Tegra T234)
+  # BPMP firmware gates UARTA clock ~8-9 min after boot.
+  # Kernel maps HSP doorbell + IVC shmem to re-enable clock on demand.
+  - compatible:
+      - nvidia,tegra234-bpmp-ipc
+    regions:
+      # HSP doorbell page (DB3 at offset 0x300)
+      - index: 0
+        kernel: BPMP_HSP_DB_PPTR
+        kernel_size: 0x1000
+      # IVC TX shmem (CPU -> BPMP)
+      - index: 1
+        kernel: BPMP_TX_PPTR
+        kernel_size: 0x1000
+      # IVC RX shmem (BPMP -> CPU)
+      - index: 2
+        kernel: BPMP_RX_PPTR
+        kernel_size: 0x1000
 
   # elfloader rules
   - compatible:

@@ -49,11 +49,13 @@ static inline void clearMemory(word_t *ptr, word_t bits)
     memzero(ptr, BIT(bits));
 }
 
-/* Cleaning memory before page table walker access */
+/* Cleaning memory before page table walker access.
+ * Use cleanCacheRange_RAM (dc cvac) to ensure data reaches PoC on platforms
+ * with system-level caches where PoU may not reach the page table walker. */
 static inline void clearMemory_PT(word_t *ptr, word_t bits)
 {
     memzero(ptr, BIT(bits));
-    cleanCacheRange_PoU((word_t)ptr, (word_t)ptr + BIT(bits) - 1,
+    cleanCacheRange_RAM((word_t)ptr, (word_t)ptr + BIT(bits) - 1,
                         addrFromPPtr(ptr));
 }
 

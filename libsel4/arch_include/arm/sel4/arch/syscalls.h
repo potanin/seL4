@@ -572,6 +572,20 @@ LIBSEL4_INLINE_FUNC seL4_MessageInfo_t seL4_NBWait(seL4_CPtr src, seL4_Word *sen
 #endif
 
 #ifdef CONFIG_PRINTING
+LIBSEL4_INLINE_FUNC void seL4_DebugDumpScheduler(void)
+{
+    seL4_Word unused0 = 0;
+    seL4_Word unused1 = 0;
+    seL4_Word unused2 = 0;
+    seL4_Word unused3 = 0;
+    seL4_Word unused4 = 0;
+    seL4_Word unused5 = 0;
+
+    arm_sys_send_recv(seL4_SysDebugDumpScheduler, 0, &unused0, 0, &unused1, &unused2, &unused3, &unused4, &unused5, 0);
+}
+#endif
+
+#if CONFIG_DEBUG_BUILD
 LIBSEL4_INLINE_FUNC void seL4_DebugPutChar(char c)
 {
     seL4_Word unused0 = 0;
@@ -592,20 +606,6 @@ LIBSEL4_INLINE_FUNC void seL4_DebugPutString(char *str)
     return;
 }
 
-LIBSEL4_INLINE_FUNC void seL4_DebugDumpScheduler(void)
-{
-    seL4_Word unused0 = 0;
-    seL4_Word unused1 = 0;
-    seL4_Word unused2 = 0;
-    seL4_Word unused3 = 0;
-    seL4_Word unused4 = 0;
-    seL4_Word unused5 = 0;
-
-    arm_sys_send_recv(seL4_SysDebugDumpScheduler, 0, &unused0, 0, &unused1, &unused2, &unused3, &unused4, &unused5, 0);
-}
-#endif
-
-#if CONFIG_DEBUG_BUILD
 LIBSEL4_INLINE_FUNC void seL4_DebugHalt(void)
 {
     arm_sys_null(seL4_SysDebugHalt);
