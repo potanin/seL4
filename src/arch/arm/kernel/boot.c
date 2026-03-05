@@ -172,6 +172,17 @@ BOOT_CODE static void init_smc(cap_t root_cnode_cap)
 }
 #endif
 
+/* Early debug: write a character directly to UART MMIO.
+ * Uses delay to let previous char drain. LSR reads hang from kernel
+ * page tables (identity-mapped DEVICE_nGnRnE) — avoid reading LSR. */
+static BOOT_CODE UNUSED void dbg_putc(volatile uint32_t *uart, char c)
+{
+    uart[0] = (uint32_t)c;
+    /* Wait ~200us for char to transmit at 115200 baud (~87us/char) */
+    volatile int j;
+    for (j = 0; j < 200000; j++) {}
+}
+
 /** This and only this function initialises the CPU.
  *
  * It does NOT initialise any kernel state.
@@ -180,16 +191,31 @@ BOOT_CODE static void init_smc(cap_t root_cnode_cap)
 BOOT_CODE static bool_t init_cpu(void)
 {
     bool_t haveHWFPU;
+    /* Use identity-mapped UART before vspace switch */
+    volatile uint32_t *uart_early = (volatile uint32_t *)0x3100000;
+
+    dbg_putc(uart_early, 'A');  /* init_cpu entered */
 
 #ifdef CONFIG_ARCH_AARCH64
     if (config_set(CONFIG_ARM_HYPERVISOR_SUPPORT)) {
         if (!checkTCR_EL2()) {
+            dbg_putc(uart_early, '!');
             return false;
         }
     }
 #endif
 
+    dbg_putc(uart_early, 'B');  /* TCR check passed */
+
     activate_kernel_vspace();
+
+    /* After vspace switch, identity map is GONE.
+     * UART is now at UART_PPTR (KDEV_BASE + 0). */
+    {
+        volatile uint32_t *uart_kdev = (volatile uint32_t *)UART_PPTR;
+        dbg_putc(uart_kdev, 'C');  /* vspace activated */
+    }
+
     if (config_set(CONFIG_ARM_HYPERVISOR_SUPPORT)) {
         vcpu_boot_init();
     }
@@ -367,10 +393,22 @@ static BOOT_CODE bool_t try_init_kernel(
     extra_bi_frame_vptr = bi_frame_vptr + BIT(seL4_BootInfoFrameBits);
 
     /* setup virtual memory for the kernel */
+    {
+        volatile uint32_t *u = (volatile uint32_t *)0x3100000;
+        dbg_putc(u, 'M');  /* before map_kernel_window */
+    }
     map_kernel_window();
+    {
+        volatile uint32_t *u = (volatile uint32_t *)0x3100000;
+        dbg_putc(u, 'W');  /* after map_kernel_window */
+    }
 
     /* initialise the CPU */
     if (!init_cpu()) {
+        volatile uint32_t *u = (volatile uint32_t *)0x3100000;
+        dbg_putc(u, 'F');  /* CPU init failed */
+        dbg_putc(u, '\r');
+        dbg_putc(u, '\n');
         printf("ERROR: CPU init failed\n");
         return false;
     }
@@ -641,6 +679,9 @@ BOOT_CODE VISIBLE void init_kernel(
 )
 {
     bool_t result;
+    volatile uint32_t *u = (volatile uint32_t *)0x3100000;
+
+    dbg_putc(u, 'I');  /* init_kernel entered */
 
 #ifdef ENABLE_SMP_SUPPORT
     /* we assume there exists a cpu with id 0 and will use it for bootstrapping */
@@ -655,6 +696,7 @@ BOOT_CODE VISIBLE void init_kernel(
     }
 
 #else
+    dbg_putc(u, 'T');  /* calling try_init_kernel */
     result = try_init_kernel(ui_p_reg_start,
                              ui_p_reg_end,
                              pv_offset,
