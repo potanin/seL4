@@ -77,12 +77,12 @@
 
 .section .boot.text, "ax"
 
-/* Debug: emit a single character to UARTA (0x3100000).
+/* Debug: emit a single character to UARTC (0xc280000).
  * Uses a delay loop to allow previous char to drain (~200us at ~1GHz).
  * LSR reads hang from kernel page tables — avoid reading LSR.
  * Uses x9, x10, x11 as scratch. */
 .macro dbg_uart chr
-    mov     x9, #0x3100000
+    mov     x9, #0xc280000
     mov     w11, #\chr
     str     w11, [x9]
     mov     x10, #0x30000       /* ~200K iterations ≈ 200us */
@@ -91,10 +91,6 @@
 .endm
 
 BEGIN_FUNC(_start)
-    /* VERY FIRST: UART writes to prove kernel entry */
-    dbg_uart 'S'
-    dbg_uart 'K'
-
     /* Save x4 and x5 so we don't clobber it */
     mov     x7, x4
     mov     x8, x5
