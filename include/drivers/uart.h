@@ -22,5 +22,3 @@ static inline void uart_console_putchar(
 #ifdef CONFIG_DEBUG_BUILD
 unsigned char uart_drv_getchar(void);
 #endif
-
-

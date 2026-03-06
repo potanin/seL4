@@ -190,7 +190,6 @@ BOOT_CODE static bool_t init_cpu(void)
 #endif
 
     activate_kernel_vspace();
-
     if (config_set(CONFIG_ARM_HYPERVISOR_SUPPORT)) {
         vcpu_boot_init();
     }

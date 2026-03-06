@@ -138,14 +138,16 @@ BEGIN_FUNC(_start)
 
     dbg_uart '2'   /* Stack set up */
 
-    /* Skip arm_errata — it's a no-op for this platform.
-     * Restore x4/x5 from x7/x8 where we saved them at _start entry. */
-    mov     x4, x7
-    mov     x5, x8
+    /* Attempt to workaround any known ARM errata. */
+    stp     x0, x1, [sp, #-16]!
+    stp     x2, x3, [sp, #-16]!
+    stp     x7, x8, [sp, #-16]!
+    bl arm_errata
+    ldp     x4, x5, [sp], #16
+    ldp     x2, x3, [sp], #16
+    ldp     x0, x1, [sp], #16
 
     dbg_uart '3'   /* About to call init_kernel */
-    dbg_uart '\r'
-    dbg_uart '\n'
 
     /* Call bootstrapping implemented in C with parameters:
      *  x0: user image physical start address
