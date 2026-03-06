@@ -793,7 +793,6 @@ exception_t handleVMFault(tcb_t *thread, vm_fault_type_t vm_faultType)
         if (ARCH_NODE_STATE(armHSVCPUActive)) {
             pc = GET_PAR_ADDR(addressTranslateS1(pc)) | (pc & MASK(PAGE_BITS));
         }
-
 #endif
         current_fault = seL4_Fault_VMFault_new(pc, fault, true);
         return EXCEPTION_FAULT;

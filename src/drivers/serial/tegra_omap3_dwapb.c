@@ -88,4 +88,3 @@ unsigned char uart_drv_getchar(void)
     return *UART_REG(UTHR);
 }
 #endif /* CONFIG_DEBUG_BUILD */
-
