@@ -19,11 +19,14 @@
 	memory@80000000 {
 		device_type = "memory";
 		/*
-		 * First contiguous RAM region from /proc/iomem.
-		 * UEFI populates memory at runtime; this provides a
-		 * known-good 992 MB region for initial bringup.
+		 * DRAM: 0x80000000 - 0x280000000 (8 GB, Non-ECC).
+		 * Firmware carve-out CO:43 at 0xbe000000 (64 MB) is
+		 * hardware-protected — accessing it triggers RAS errors.
+		 * Declare two regions that skip the carve-out so it
+		 * doesn't become a device untyped.
 		 */
-		reg = <0x00 0x80000000 0x00 0x3e000000>;
+		reg = <0x00 0x80000000 0x00 0x3e000000   /* 992 MB before carve-out */
+		       0x00 0xc2000000 0x00 0x3e000000>; /* 992 MB after carve-out */
 	};
 
 	/*
