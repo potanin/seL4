@@ -269,24 +269,33 @@ BOOT_CODE void map_kernel_window(void)
                                     );
     }
 
-    /* map the kernel window using large pages */
-    vaddr = PPTR_BASE;
-    for (paddr = PADDR_BASE; paddr < PADDR_TOP; paddr += BIT(seL4_LargePageBits)) {
-        armKSGlobalKernelPDs[GET_KPT_INDEX(vaddr, KLVL_FRM_ARM_PT_LVL(1))][GET_KPT_INDEX(vaddr,
-                                                                                         KLVL_FRM_ARM_PT_LVL(2))] = pte_pte_page_new(
+    /* Map only the SDRAM regions present in the physical memory window.
+     * The upstream code maps PADDR_BASE..PADDR_TOP which covers the entire
+     * physical address range as Normal memory. On processors with speculative
+     * execution (e.g. Cortex-A78AE on T234), speculative accesses to
+     * device/firmware addresses mapped as Normal trigger RAS errors.
+     * Only mapping actual DRAM avoids this. */
+    for (word_t r = 0; r < ARRAY_SIZE(avail_p_regs); r++) {
+        assert(IS_ALIGNED(avail_p_regs[r].start, seL4_LargePageBits));
+        assert(IS_ALIGNED(avail_p_regs[r].end, seL4_LargePageBits));
+        for (paddr = avail_p_regs[r].start; paddr < avail_p_regs[r].end;
+             paddr += BIT(seL4_LargePageBits)) {
+            vaddr = paddr + PPTR_BASE_OFFSET;
+            armKSGlobalKernelPDs[GET_KPT_INDEX(vaddr, KLVL_FRM_ARM_PT_LVL(1))][GET_KPT_INDEX(vaddr,
+                                                                                             KLVL_FRM_ARM_PT_LVL(2))] = pte_pte_page_new(
 #ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
-                                                                                                                        0, // XN
+                                                                                                                            0, // XN
 #else
-                                                                                                                        1, // UXN
+                                                                                                                            1, // UXN
 #endif
-                                                                                                                        paddr,
-                                                                                                                        0,                        /* global */
-                                                                                                                        1,                        /* access flag */
-                                                                                                                        INNER_SHAREABLE,        /* Inner-shareable if SMP enabled, otherwise unshared */
-                                                                                                                        0,                        /* VMKernelOnly */
-                                                                                                                        NORMAL
-                                                                                                                    );
-        vaddr += BIT(seL4_LargePageBits);
+                                                                                                                            paddr,
+                                                                                                                            0,                        /* global */
+                                                                                                                            1,                        /* access flag */
+                                                                                                                            INNER_SHAREABLE,        /* Inner-shareable if SMP enabled, otherwise unshared */
+                                                                                                                            0,                        /* VMKernelOnly */
+                                                                                                                            NORMAL
+                                                                                                                        );
+        }
     }
 
     /* put the PD into the PUD for device window */
