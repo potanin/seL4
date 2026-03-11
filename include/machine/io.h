@@ -14,8 +14,25 @@ unsigned char kernel_getDebugChar(void);
 #endif
 
 
-/* the actual output function — always available for SysDebugPutChar */
+#ifdef CONFIG_PRINTING
+
+#include <arch/types.h>
+#include <stdarg.h>
+
+/* the actual output function */
 void kernel_putDebugChar(unsigned char c);
+
+/* This is the actual implementation of the kernel printing API. It must never
+ * be called directly from anywhere except the function defined in this file.
+ */
+int impl_kvprintf(const char *format, va_list ap);
+int impl_ksnvprintf(char *str, word_t size, const char *format, va_list ap);
+
+/*
+ *------------------------------------------------------------------------------
+ * Kernel printing API
+ *------------------------------------------------------------------------------
+ */
 
 /* Writes a character to the kernel output channel. This is used to implement
  * the syscall SysDebugPutChar.
@@ -23,19 +40,9 @@ void kernel_putDebugChar(unsigned char c);
 static inline void kernel_putchar(
     char c)
 {
+    /* Write to target specific debug output channel. */
     kernel_putDebugChar(c);
 }
-
-#ifdef CONFIG_PRINTING
-
-#include <arch/types.h>
-#include <stdarg.h>
-
-/* This is the actual implementation of the kernel printing API. It must never
- * be called directly from anywhere except the function defined in this file.
- */
-int impl_kvprintf(const char *format, va_list ap);
-int impl_ksnvprintf(char *str, word_t size, const char *format, va_list ap);
 
 /* Writes a character to the active output channel. This is used by all code
  * related to printf(). Contrary to the common signature of putchar(), there is

@@ -96,13 +96,11 @@ exception_t handleInterruptEntry(void)
 
 exception_t handleUnknownSyscall(word_t w)
 {
-#ifdef CONFIG_DEBUG_BUILD
+#ifdef CONFIG_PRINTING
     if (w == SysDebugPutChar) {
         kernel_putchar(getRegister(NODE_STATE(ksCurThread), capRegister));
         return EXCEPTION_NONE;
     }
-#endif
-#ifdef CONFIG_PRINTING
     if (w == SysDebugDumpScheduler) {
 #ifdef CONFIG_DEBUG_BUILD
         debug_dumpScheduler();
