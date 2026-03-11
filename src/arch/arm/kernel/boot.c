@@ -28,63 +28,6 @@
 #include <drivers/smmu/smmuv2.h>
 #endif
 
-#ifdef CONFIG_PLAT_ORIN_NANO
-/*
- * Register SDEI handler for T234 RAS errors.
- *
- * NVIDIA's ATF catches bus fabric SErrors (from stale firmware cache
- * line writebacks) and dispatches them via SDEI. Without a registered
- * handler, ATF kills the core. The handler (in traps.S) just calls
- * SDEI_EVENT_COMPLETE_AND_RESUME to resume the interrupted context.
- */
-extern void sdei_ras_handler(void);
-
-static inline word_t sdei_smc(word_t x0, word_t x1, word_t x2,
-                              word_t x3, word_t x4, word_t x5)
-{
-    register word_t r0 asm("x0") = x0;
-    register word_t r1 asm("x1") = x1;
-    register word_t r2 asm("x2") = x2;
-    register word_t r3 asm("x3") = x3;
-    register word_t r4 asm("x4") = x4;
-    register word_t r5 asm("x5") = x5;
-    asm volatile("smc #0"
-        : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
-        : "r"(r4), "r"(r5)
-        : "x6", "x7", "x8", "x9", "x10", "x11",
-          "x12", "x13", "x14", "x15", "x16", "x17");
-    return r0;
-}
-
-static BOOT_CODE void sdei_register_ras_handler(void)
-{
-    word_t ret;
-
-    /* Check SDEI version */
-    ret = sdei_smc(0xC4000020, 0, 0, 0, 0, 0);
-    if ((sword_t)ret < 0) {
-        printf("SDEI not supported (%lx)\n", ret);
-        return;
-    }
-    printf("SDEI version %lx\n", ret);
-
-    /* Register handler for all SDEI events we can find.
-     * Scan 0-10000 to find the event NVIDIA's ATF uses for RAS errors. */
-    word_t count = 0;
-    for (word_t ev = 0; ev < 10000; ev++) {
-        ret = sdei_smc(0xC4000021, ev, (word_t)sdei_ras_handler, 0, 0, 0);
-        if ((sword_t)ret >= 0) {
-            sdei_smc(0xC4000022, ev, 0, 0, 0, 0);
-            printf("SDEI event %lu OK\n", ev);
-            count++;
-        }
-    }
-    printf("SDEI: %lu events registered\n", count);
-
-    /* Unmask PE for SDEI delivery */
-    sdei_smc(0xC400002C, 0, 0, 0, 0, 0);
-}
-#endif
 
 #ifdef ENABLE_SMP_SUPPORT
 /* SMP boot synchronization works based on a global variable with the initial
@@ -439,11 +382,6 @@ static BOOT_CODE bool_t try_init_kernel(
     /* initialise the platform */
     init_plat();
 
-#ifdef CONFIG_PLAT_ORIN_NANO
-    /* Register SDEI handler so ATF doesn't kill the core on
-     * stale firmware cache line RAS errors */
-    sdei_register_ras_handler();
-#endif
 
     /* If a DTB was provided, pass the data on as extra bootinfo */
     p_region_t dtb_p_reg = P_REG_EMPTY;

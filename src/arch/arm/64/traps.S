@@ -236,29 +236,3 @@ BEGIN_FUNC(lower_el_serr)
     b       invalid_vector_entry
 #endif
 END_FUNC(lower_el_serr)
-
-#ifdef CONFIG_PLAT_ORIN_NANO
-/*
- * SDEI handler for T234 RAS errors.
- *
- * NVIDIA's ATF catches SErrors at EL3 and dispatches them via SDEI.
- * Without a registered handler, ATF kills the core.
- * This handler acknowledges the error and resumes execution.
- *
- * On entry (from ATF via ERET to EL2):
- *   x0 = event number
- *   x1 = ep_arg (0)
- *   x2 = interrupted PC
- *   x3 = interrupted PSTATE
- */
-.global sdei_ras_handler
-.align 4
-BEGIN_FUNC(sdei_ras_handler)
-    /* SDEI_EVENT_COMPLETE_AND_RESUME: resume at interrupted PC */
-    mov     x1, x2
-    movz    x0, #0x0026
-    movk    x0, #0xc400, lsl #16
-    smc     #0
-    b       .
-END_FUNC(sdei_ras_handler)
-#endif

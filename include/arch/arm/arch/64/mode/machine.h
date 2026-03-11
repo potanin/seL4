@@ -181,13 +181,6 @@ static inline void setCurrentUserVSpaceRoot(ttbr_t ttbr)
     dsb();
     if (config_set(CONFIG_ARM_HYPERVISOR_SUPPORT)) {
         MSR("vttbr_el2", ttbr.words[0]);
-        dsb();
-        isb();
-        /* Invalidate all stage-1 and stage-2 TLB entries at EL1 across all
-         * VMIDs. Required on platforms where the walk cache retains stale
-         * intermediate entries after VMID reuse (e.g. NVIDIA T234). */
-        asm volatile("tlbi alle1");
-        dsb();
     } else {
         MSR("ttbr0_el1", ttbr.words[0]);
     }
