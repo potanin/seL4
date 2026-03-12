@@ -271,10 +271,14 @@ BOOT_CODE void map_kernel_window(void)
 
     /* Map only the SDRAM regions present in the physical memory window.
      * The upstream code maps PADDR_BASE..PADDR_TOP which covers the entire
-     * physical address range as Normal memory. On processors with speculative
-     * execution (e.g. Cortex-A78AE on T234), speculative accesses to
-     * device/firmware addresses mapped as Normal trigger RAS errors.
-     * Only mapping actual DRAM avoids this. */
+     * physical address range as Normal memory. On T234, speculative data reads
+     * to firmware-protected addresses (e.g. carve-out CO:43) trigger RAS errors.
+     * Tested alternatives:
+     *   - NORMAL + XN=1 for full range: fails (XN only blocks instruction fetch,
+     *     not speculative data reads)
+     *   - DEVICE_nGnRnE for non-DRAM gaps: prevents RAS but kernel creates
+     *     untypeds for the gap, breaking memory allocation
+     * Only mapping actual DRAM (leaving gaps unmapped) works correctly. */
     for (word_t r = 0; r < ARRAY_SIZE(avail_p_regs); r++) {
         assert(IS_ALIGNED(avail_p_regs[r].start, seL4_LargePageBits));
         assert(IS_ALIGNED(avail_p_regs[r].end, seL4_LargePageBits));
