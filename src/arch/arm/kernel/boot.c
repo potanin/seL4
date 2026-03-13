@@ -28,7 +28,6 @@
 #include <drivers/smmu/smmuv2.h>
 #endif
 
-
 #ifdef ENABLE_SMP_SUPPORT
 /* SMP boot synchronization works based on a global variable with the initial
  * value 0, as the loader must zero all BSS variables. Secondary cores keep
@@ -381,7 +380,6 @@ static BOOT_CODE bool_t try_init_kernel(
 
     /* initialise the platform */
     init_plat();
-
 
     /* If a DTB was provided, pass the data on as extra bootinfo */
     p_region_t dtb_p_reg = P_REG_EMPTY;
