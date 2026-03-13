@@ -68,17 +68,22 @@ enum mair_s2_types {
     S2_NORMAL = S2_NORMAL_INNER_WBC_OUTER_WBC
 };
 
-/* ARM DDI 0487J.a, section D8.5.2
- *
- * All cacheable memory is marked Inner Shareable unconditionally.
- * Arm states: "Arm expects operating systems to mark the majority of DRAM
- * memory as Normal Write-back cacheable, Inner shareable."
- *
- * On SoCs with system-level caches (e.g. T234 SLC), non-CPU agents require
- * IS domain coherency. Performance impact is negligible.
+/* Leif from Linaro said the big.LITTLE clusters should be treated as
+ * inner shareable, and we believe so, although the Example B2-1 given in
+ * ARM ARM DDI 0487B.b (ID092517) says otherwise.
  */
-#define SMP_SHARE       3
-#define INNER_SHAREABLE 3
+
+#define SMP_SHARE   3
+
+/* On T234, the hardware page table walker participates in the inner
+ * shareable domain. Without IS, PTEs flushed by dc civac may remain
+ * stale in the system-level cache (SLC) from the walker's perspective.
+ * Force inner shareable even in non-SMP builds. */
+#ifdef CONFIG_PLAT_ORIN_NANO
+#define PAGE_SHAREABLE SMP_SHARE
+#else
+#define PAGE_SHAREABLE SMP_TERNARY(SMP_SHARE, 0)
+#endif
 
 struct lookupPTSlot_ret {
     pte_t *ptSlot;
@@ -225,7 +230,7 @@ BOOT_CODE void map_kernel_frame(paddr_t paddr, pptr_t vaddr, vm_rights_t vm_righ
     word_t shareable;
     if (vm_attributes_get_armPageCacheable(attributes)) {
         attr_index = NORMAL;
-        shareable = INNER_SHAREABLE;
+        shareable = PAGE_SHAREABLE;
     } else {
         attr_index = DEVICE_nGnRnE;
         shareable = 0;
@@ -295,7 +300,7 @@ BOOT_CODE void map_kernel_window(void)
                                                                                                                             paddr,
                                                                                                                             0,                        /* global */
                                                                                                                             1,                        /* access flag */
-                                                                                                                            INNER_SHAREABLE,        /* Inner-shareable if SMP enabled, otherwise unshared */
+                                                                                                                            PAGE_SHAREABLE,        /* Inner-shareable if SMP enabled, otherwise unshared */
                                                                                                                             0,                        /* VMKernelOnly */
                                                                                                                             NORMAL
                                                                                                                         );
@@ -354,7 +359,7 @@ static BOOT_CODE void map_it_frame_cap(cap_t vspace_cap, cap_t frame_cap, bool_t
                                                               1,                              /* not global */
 #endif
                                                               1,                              /* access flag */
-                                                              INNER_SHAREABLE,              /* Inner-shareable if SMP enabled, otherwise unshared */
+                                                              PAGE_SHAREABLE,              /* Inner-shareable if SMP enabled, otherwise unshared */
                                                               APFromVMRights(VMReadWrite),
 #ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
                                                               S2_NORMAL
@@ -766,7 +771,7 @@ static pte_t makeUserPagePTE(paddr_t paddr, vm_rights_t vm_rights, vm_attributes
 #endif
 
     /* Inner-shareable if SMP enabled, otherwise unshared (ignored for devices) */
-    word_t shareable = cacheable ? INNER_SHAREABLE : 0;
+    word_t shareable = cacheable ? PAGE_SHAREABLE : 0;
 
     if (page_size == ARMSmallPage) {
         return pte_pte_4k_page_new(nonexecutable, paddr, nG, 1 /* access flag */,
@@ -2059,7 +2064,7 @@ exception_t benchmark_arch_map_logBuffer(word_t frame_cptr)
                              ksUserLogBuffer,
                              0,                         /* global */
                              1,                         /* access flag */
-                             INNER_SHAREABLE, /* Inner-shareable if SMP enabled, otherwise unshared */
+                             PAGE_SHAREABLE, /* Inner-shareable if SMP enabled, otherwise unshared */
                              0,                         /* VMKernelOnly */
                              NORMAL_WT);
 
