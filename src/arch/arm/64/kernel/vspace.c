@@ -79,7 +79,7 @@ enum mair_s2_types {
  * shareable domain. Without IS, PTEs flushed by dc civac may remain
  * stale in the system-level cache (SLC) from the walker's perspective.
  * Force inner shareable even in non-SMP builds. */
-#ifdef CONFIG_PLAT_ORIN_NANO
+#if defined(CONFIG_PLAT_ORIN_NANO) || defined(CONFIG_PLAT_ORIN_AGX)
 #define PAGE_SHAREABLE SMP_SHARE
 #else
 #define PAGE_SHAREABLE SMP_TERNARY(SMP_SHARE, 0)

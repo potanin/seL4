@@ -589,7 +589,7 @@ static BOOT_CODE bool_t try_init_kernel(
     init_core_state(initial);
 
     /* create all of the untypeds. Both devices and kernel window memory */
-#ifdef CONFIG_PLAT_ORIN_NANO
+#if defined(CONFIG_PLAT_ORIN_NANO) || defined(CONFIG_PLAT_ORIN_AGX)
     /* T234 SoC: reserve the first 2 MiB of physical address space.
      * This range contains firmware-protected regions (e.g. 0x0, 0xda0,
      * 0xff0) — CPU accesses trigger RAS errors that kill the core.
