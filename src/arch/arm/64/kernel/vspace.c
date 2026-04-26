@@ -75,6 +75,16 @@ enum mair_s2_types {
 
 #define SMP_SHARE   3
 
+/* On T234, the hardware page table walker participates in the inner
+ * shareable domain. Without IS, PTEs flushed by dc civac may remain
+ * stale in the system-level cache (SLC) from the walker's perspective.
+ * Force inner shareable even in non-SMP builds. */
+#if defined(CONFIG_PLAT_ORIN_NANO) || defined(CONFIG_PLAT_ORIN_AGX)
+#define PAGE_SHAREABLE SMP_SHARE
+#else
+#define PAGE_SHAREABLE SMP_TERNARY(SMP_SHARE, 0)
+#endif
+
 struct lookupPTSlot_ret {
     pte_t *ptSlot;
     word_t ptBitsLeft;
@@ -220,7 +230,7 @@ BOOT_CODE void map_kernel_frame(paddr_t paddr, pptr_t vaddr, vm_rights_t vm_righ
     word_t shareable;
     if (vm_attributes_get_armPageCacheable(attributes)) {
         attr_index = NORMAL;
-        shareable = SMP_TERNARY(SMP_SHARE, 0);
+        shareable = PAGE_SHAREABLE;
     } else {
         attr_index = DEVICE_nGnRnE;
         shareable = 0;
@@ -264,24 +274,37 @@ BOOT_CODE void map_kernel_window(void)
                                     );
     }
 
-    /* map the kernel window using large pages */
-    vaddr = PPTR_BASE;
-    for (paddr = PADDR_BASE; paddr < PADDR_TOP; paddr += BIT(seL4_LargePageBits)) {
-        armKSGlobalKernelPDs[GET_KPT_INDEX(vaddr, KLVL_FRM_ARM_PT_LVL(1))][GET_KPT_INDEX(vaddr,
-                                                                                         KLVL_FRM_ARM_PT_LVL(2))] = pte_pte_page_new(
+    /* Map only the SDRAM regions present in the physical memory window.
+     * The upstream code maps PADDR_BASE..PADDR_TOP which covers the entire
+     * physical address range as Normal memory. On T234, speculative data reads
+     * to firmware-protected addresses (e.g. carve-out CO:43) trigger RAS errors.
+     * Tested alternatives:
+     *   - NORMAL + XN=1 for full range: fails (XN only blocks instruction fetch,
+     *     not speculative data reads)
+     *   - DEVICE_nGnRnE for non-DRAM gaps: prevents RAS but kernel creates
+     *     untypeds for the gap, breaking memory allocation
+     * Only mapping actual DRAM (leaving gaps unmapped) works correctly. */
+    for (word_t r = 0; r < ARRAY_SIZE(avail_p_regs); r++) {
+        assert(IS_ALIGNED(avail_p_regs[r].start, seL4_LargePageBits));
+        assert(IS_ALIGNED(avail_p_regs[r].end, seL4_LargePageBits));
+        for (paddr = avail_p_regs[r].start; paddr < avail_p_regs[r].end;
+             paddr += BIT(seL4_LargePageBits)) {
+            vaddr = paddr + PPTR_BASE_OFFSET;
+            armKSGlobalKernelPDs[GET_KPT_INDEX(vaddr, KLVL_FRM_ARM_PT_LVL(1))][GET_KPT_INDEX(vaddr,
+                                                                                             KLVL_FRM_ARM_PT_LVL(2))] = pte_pte_page_new(
 #ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
-                                                                                                                        0, // XN
+                                                                                                                            0, // XN
 #else
-                                                                                                                        1, // UXN
+                                                                                                                            1, // UXN
 #endif
-                                                                                                                        paddr,
-                                                                                                                        0,                        /* global */
-                                                                                                                        1,                        /* access flag */
-                                                                                                                        SMP_TERNARY(SMP_SHARE, 0),        /* Inner-shareable if SMP enabled, otherwise unshared */
-                                                                                                                        0,                        /* VMKernelOnly */
-                                                                                                                        NORMAL
-                                                                                                                    );
-        vaddr += BIT(seL4_LargePageBits);
+                                                                                                                            paddr,
+                                                                                                                            0,                        /* global */
+                                                                                                                            1,                        /* access flag */
+                                                                                                                            PAGE_SHAREABLE,        /* Inner-shareable if SMP enabled, otherwise unshared */
+                                                                                                                            0,                        /* VMKernelOnly */
+                                                                                                                            NORMAL
+                                                                                                                        );
+        }
     }
 
     /* put the PD into the PUD for device window */
@@ -336,7 +359,7 @@ static BOOT_CODE void map_it_frame_cap(cap_t vspace_cap, cap_t frame_cap, bool_t
                                                               1,                              /* not global */
 #endif
                                                               1,                              /* access flag */
-                                                              SMP_TERNARY(SMP_SHARE, 0),              /* Inner-shareable if SMP enabled, otherwise unshared */
+                                                              PAGE_SHAREABLE,              /* Inner-shareable if SMP enabled, otherwise unshared */
                                                               APFromVMRights(VMReadWrite),
 #ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
                                                               S2_NORMAL
@@ -542,6 +565,55 @@ BOOT_CODE cap_t create_mapped_it_frame_cap(cap_t pd_cap, pptr_t pptr, vptr_t vpt
 
 BOOT_CODE void activate_kernel_vspace(void)
 {
+    /* T234 (Orin): replace cleanInvalidateL1Caches() with dc civac over
+     * the kernel page tables. dc cisw (clean+invalidate by set/way) only
+     * reaches CPU caches on T234, not the system-level cache (SLC).
+     * dc civac (clean+invalidate by VA to PoC) ensures entries reach DRAM
+     * and are removed from ALL caches including SLC, so the hardware
+     * page table walker will fetch correct entries on TLB miss. */
+    {
+        word_t addr, end;
+
+        /* Flush+invalidate PGD */
+        addr = (word_t)armKSGlobalKernelPGD & ~63UL;
+        end  = (word_t)armKSGlobalKernelPGD + sizeof(armKSGlobalKernelPGD);
+        for (; addr < end; addr += 64) {
+            asm volatile("dc civac, %0" :: "r"(addr) : "memory");
+        }
+
+        /* Flush+invalidate PUD */
+        addr = (word_t)armKSGlobalKernelPUD & ~63UL;
+        end  = (word_t)armKSGlobalKernelPUD + sizeof(armKSGlobalKernelPUD);
+        for (; addr < end; addr += 64) {
+            asm volatile("dc civac, %0" :: "r"(addr) : "memory");
+        }
+
+        /* Flush+invalidate all PDs (512 × 4KB = 2MB) */
+        addr = (word_t)armKSGlobalKernelPDs & ~63UL;
+        end  = (word_t)armKSGlobalKernelPDs + sizeof(armKSGlobalKernelPDs);
+        for (; addr < end; addr += 64) {
+            asm volatile("dc civac, %0" :: "r"(addr) : "memory");
+        }
+
+        /* Flush+invalidate device PT */
+        addr = (word_t)armKSGlobalKernelPT & ~63UL;
+        end  = (word_t)armKSGlobalKernelPT + sizeof(armKSGlobalKernelPT);
+        for (; addr < end; addr += 64) {
+            asm volatile("dc civac, %0" :: "r"(addr) : "memory");
+        }
+
+        /* Flush+invalidate user vspace root */
+        addr = (word_t)armKSGlobalUserVSpace & ~63UL;
+        end  = (word_t)armKSGlobalUserVSpace + sizeof(armKSGlobalUserVSpace);
+        for (; addr < end; addr += 64) {
+            asm volatile("dc civac, %0" :: "r"(addr) : "memory");
+        }
+
+        asm volatile("dsb sy; isb" ::: "memory");
+    }
+
+    /* Still call cleanInvalidateL1Caches for I-cache invalidation and
+     * any other kernel state that needs flushing. */
     cleanInvalidateL1Caches();
     setCurrentKernelVSpaceRoot(ttbr_new(0, addrFromKPPtr(armKSGlobalKernelPGD)));
 
@@ -699,7 +771,7 @@ static pte_t makeUserPagePTE(paddr_t paddr, vm_rights_t vm_rights, vm_attributes
 #endif
 
     /* Inner-shareable if SMP enabled, otherwise unshared (ignored for devices) */
-    word_t shareable = cacheable ? SMP_TERNARY(SMP_SHARE, 0) : 0;
+    word_t shareable = cacheable ? PAGE_SHAREABLE : 0;
 
     if (page_size == ARMSmallPage) {
         return pte_pte_4k_page_new(nonexecutable, paddr, nG, 1 /* access flag */,
@@ -1028,7 +1100,7 @@ void unmapPageTable(asid_t asid, vptr_t vptr, pte_t *target_pt)
     /* If we found a pt then ptSlot won't be null */
     assert(ptSlot != NULL);
     *ptSlot = pte_pte_invalid_new();
-    cleanByVA_PoU((vptr_t)ptSlot, pptr_to_paddr(ptSlot));
+    cleanInvalByVA((vptr_t)ptSlot, pptr_to_paddr(ptSlot));
     invalidateTLBByASID(asid);
 }
 
@@ -1061,7 +1133,7 @@ void unmapPage(vm_page_size_t page_size, asid_t asid, vptr_t vptr, pptr_t pptr)
     }
 
     *(lu_ret.ptSlot) = pte_pte_invalid_new();
-    cleanByVA_PoU((vptr_t)lu_ret.ptSlot, pptr_to_paddr(lu_ret.ptSlot));
+    cleanInvalByVA((vptr_t)lu_ret.ptSlot, pptr_to_paddr(lu_ret.ptSlot));
     assert(asid < BIT(16));
     invalidateTLBByASIDVA(asid, vptr);
 }
@@ -1175,7 +1247,7 @@ static exception_t performPageTableInvocationMap(cap_t cap, cte_t *ctSlot, pte_t
 {
     ctSlot->cap = cap;
     *ptSlot = pte;
-    cleanByVA_PoU((vptr_t)ptSlot, pptr_to_paddr(ptSlot));
+    cleanInvalByVA((vptr_t)ptSlot, pptr_to_paddr(ptSlot));
 
     return EXCEPTION_NONE;
 }
@@ -1201,7 +1273,7 @@ static exception_t performPageInvocationMap(asid_t asid, cap_t cap, cte_t *ctSlo
     ctSlot->cap = cap;
     *ptSlot = pte;
 
-    cleanByVA_PoU((vptr_t)ptSlot, pptr_to_paddr(ptSlot));
+    cleanInvalByVA((vptr_t)ptSlot, pptr_to_paddr(ptSlot));
     if (unlikely(tlbflush_required)) {
         assert(asid < BIT(16));
         invalidateTLBByASIDVA(asid, cap_frame_cap_get_capFMappedAddress(cap));
@@ -1992,7 +2064,7 @@ exception_t benchmark_arch_map_logBuffer(word_t frame_cptr)
                              ksUserLogBuffer,
                              0,                         /* global */
                              1,                         /* access flag */
-                             SMP_TERNARY(SMP_SHARE, 0), /* Inner-shareable if SMP enabled, otherwise unshared */
+                             PAGE_SHAREABLE, /* Inner-shareable if SMP enabled, otherwise unshared */
                              0,                         /* VMKernelOnly */
                              NORMAL_WT);
 

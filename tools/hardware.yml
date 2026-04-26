@@ -187,6 +187,7 @@ devices:
       - fsl,imx7ulp-lpuart
       - fsl,imx6sx-uart
       - nvidia,tegra124-hsuart
+      - nvidia,tegra194-hsuart
       - nvidia,tegra20-uart
       - qcom,msm-uartdm
       - samsung,exynos4210-uart
@@ -221,6 +222,7 @@ devices:
     regions:
       - index: 0
         kernel: CLINT_PPTR
+
 
   # elfloader rules
   - compatible:

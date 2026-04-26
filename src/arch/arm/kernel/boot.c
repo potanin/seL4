@@ -589,6 +589,16 @@ static BOOT_CODE bool_t try_init_kernel(
     init_core_state(initial);
 
     /* create all of the untypeds. Both devices and kernel window memory */
+#if defined(CONFIG_PLAT_ORIN_NANO) || defined(CONFIG_PLAT_ORIN_AGX)
+    /* T234 SoC: reserve the first 2 MiB of physical address space.
+     * This range contains firmware-protected regions (e.g. 0x0, 0xda0,
+     * 0xff0) — CPU accesses trigger RAS errors that kill the core.
+     * Reserving it prevents seL4 from creating device untypeds there.
+     * First real device (HSP) is at 0x1600000, well above this. */
+    reserve_region((p_region_t) {
+        .start = 0, .end = 0x200000
+    });
+#endif
     if (!create_untypeds(root_cnode_cap)) {
         printf("ERROR: could not create untypteds for kernel image boot memory\n");
         return false;
