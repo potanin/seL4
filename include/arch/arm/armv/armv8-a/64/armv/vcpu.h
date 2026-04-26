@@ -21,10 +21,22 @@
 #define HCR_NATIVE ( HCR_COMMON | HCR_TGE | HCR_TVM | HCR_TTLB | HCR_DC \
                    | HCR_TAC | HCR_SWIO |  HCR_TSC )
 
+/* HCR_DC forces MMU-off guest accesses to be Normal cacheable instead of
+ * Device-nGnRnE, which was needed for our part-4 tiny stub that runs with
+ * MMU off. But upstream Jetson Orin port (seL4 PR #1135) runs HCR_VCPU
+ * without HCR_DC, and we suspect HCR_DC's override of ALL guest EL1/EL0
+ * data memory attributes may interact badly with Linux's first .rodata
+ * write under stage-2 on A78AE/T234. Leave HCR_DC off by default; guests
+ * that need it (MMU-off bare-metal) must be rewritten to enable MMU or
+ * we re-enable HCR_DC in a per-platform knob.
+ *
+ * HCR_TID3 traps guest reads of ID group 3 registers so we can filter
+ * features the stage-2 translator can't express — notably forcing
+ * ID_AA64MMFR0_EL1.PARange to 40-bit. (Also harmless if left in.) */
 #ifdef CONFIG_DISABLE_WFI_WFE_TRAPS
-#define HCR_VCPU   ( HCR_COMMON)
+#define HCR_VCPU   ( HCR_COMMON | HCR_TID3)
 #else
-#define HCR_VCPU   ( HCR_COMMON | HCR_TWE | HCR_TWI)
+#define HCR_VCPU   ( HCR_COMMON | HCR_TWE | HCR_TWI | HCR_TID3)
 #endif
 
 #define SCTLR_EL1_UCI       BIT(26)     /* Enable EL0 access to DC CVAU, DC CIVAC, DC CVAC,
@@ -712,6 +724,77 @@ static inline void armv_vcpu_init(vcpu_t *vcpu)
     vcpu_write_reg(vcpu, seL4_VCPUReg_SCTLR, SCTLR_EL1_VM);
 }
 
+/* Emulate guest reads of ID group 3 registers that HCR_TID3 traps.
+ * Returns true if handled (Rt updated, PC advanced), false to fall
+ * through and deliver a VCPUFault. */
+static inline bool_t armv_handle_id_trap(word_t hsr)
+{
+    /* EC=0x18 (MSR/MRS trap). Decode ISS. */
+    if (((hsr >> 26) & 0x3f) != 0x18) {
+        return false;
+    }
+    word_t iss = hsr & 0xffffff;
+    bool_t is_read = iss & 0x1;
+    word_t crm = (iss >> 1) & 0xf;
+    word_t rt  = (iss >> 5) & 0x1f;
+    word_t crn = (iss >> 10) & 0xf;
+    word_t op1 = (iss >> 14) & 0x7;
+    word_t op2 = (iss >> 17) & 0x7;
+    word_t op0 = (iss >> 20) & 0x3;
+
+    /* We only service reads (ID registers are RO). MSR to ID regs would
+     * be an architectural violation — let it surface as a VCPUFault. */
+    if (!is_read) {
+        return false;
+    }
+    /* ID group 3 in AArch64 is op0=3, op1=0, crn=0, crm in {0..7}, op2 free */
+    if (!(op0 == 3 && op1 == 0 && crn == 0 && crm <= 7)) {
+        return false;
+    }
+
+    word_t val = 0;
+    /* Read the actual hardware value by CRm/op2. */
+    switch ((crm << 3) | op2) {
+    /* CRm=0: AA64PFR0, AA64PFR1. AA64ZFR0 (SVE) and AA64SMFR0 (SME) fall
+     * through to return 0 — the base armv8-a build target lacks the
+     * assembler mnemonics and the hardware won't set the advertising
+     * feature bits in AA64PFR0 either. */
+    case (0 << 3) | 0: MRS("id_aa64pfr0_el1",  val); break;
+    case (0 << 3) | 1: MRS("id_aa64pfr1_el1",  val); break;
+    /* CRm=1: AA64DFR0, AA64DFR1 */
+    case (1 << 3) | 0: MRS("id_aa64dfr0_el1",  val); break;
+    case (1 << 3) | 1: MRS("id_aa64dfr1_el1",  val); break;
+    /* CRm=4: AA64AFR0, AA64AFR1 */
+    case (4 << 3) | 0: MRS("id_aa64afr0_el1",  val); break;
+    case (4 << 3) | 1: MRS("id_aa64afr1_el1",  val); break;
+    /* CRm=5: AA64ISAR0, AA64ISAR1, AA64ISAR2 */
+    case (5 << 3) | 0: MRS("id_aa64isar0_el1", val); break;
+    case (5 << 3) | 1: MRS("id_aa64isar1_el1", val); break;
+    case (5 << 3) | 2: MRS("id_aa64isar2_el1", val); break;
+    /* CRm=7: AA64MMFR0, AA64MMFR1, AA64MMFR2 — mask PARange on MMFR0 */
+    case (7 << 3) | 0:
+        MRS("id_aa64mmfr0_el1", val);
+        /* Force PARange (bits[3:0]) to 0b0010 (40-bit) to match VTCR_EL2.PS */
+        val = (val & ~0xfUL) | 0x2UL;
+        break;
+    case (7 << 3) | 1: MRS("id_aa64mmfr1_el1", val); break;
+    case (7 << 3) | 2: MRS("id_aa64mmfr2_el1", val); break;
+    default:
+        /* Unknown ID reg in group 3 — architecturally RES0. */
+        val = 0;
+        break;
+    }
+
+    /* Write emulated value to guest's Rt (unless Rt==31, i.e. XZR). */
+    tcb_t *thread = NODE_STATE(ksCurThread);
+    if (rt != 31) {
+        setRegister(thread, rt, val);
+    }
+    /* Advance ELR_EL1 past the MRS instruction. */
+    setNextPC(thread, getRestartPC(thread) + 4);
+    return true;
+}
+
 static inline bool_t armv_handleVCPUFault(word_t hsr)
 {
 #ifdef CONFIG_HARDWARE_DEBUG_API
@@ -720,6 +803,10 @@ static inline bool_t armv_handleVCPUFault(word_t hsr)
         return true;
     }
 #endif
+
+    if (armv_handle_id_trap(hsr)) {
+        return true;
+    }
 
     if (hsr == UNKNOWN_FAULT) {
         handleUserLevelFault(getESR(), 0);

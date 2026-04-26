@@ -13,7 +13,9 @@ if(KernelPlatformOrinAgx)
     set(KernelArmCortexA72 ON)
     set(KernelArchArmV8a ON)
     # Override A72's 44-bit PA to 40-bit: Orin uses <1TB physical space
-    # and 44-bit creates massive device untypeds (up to 2^43) that break sel4test
+    # and 44-bit creates massive device untypeds (up to 2^43) that break sel4test.
+    # Also tested 44 for libvmm Linux-guest debugging (2026-04-23) — identical
+    # DFSC=0 fault, so there's no benefit to running 44 here.
     set(KernelPlatformPASizeBitsOverride 40)
     set(KernelArmGicV3 ON)
     set(KernelAArch64SErrorIgnore ON)
